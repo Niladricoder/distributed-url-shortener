@@ -742,12 +742,8 @@
     const detailShortCode = document.getElementById('detailShortCode');
     const detailSnowflakeId = document.getElementById('detailSnowflakeId');
 
-    // Auto-detect backend API address:
-    // If running on backend port (e.g. :3000), use relative path.
-    // If opened via Live Server (e.g. :5500) or file://, target http://localhost:3000
-    const API_BASE = (window.location.port === '3000') 
-      ? '' 
-      : 'http://localhost:3000';
+    // Frontend and API are served from the same origin in production and locally.
+    const API_BASE = '';
 
     // Clear any previously saved local storage history
     try {
