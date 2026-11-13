@@ -8,6 +8,7 @@ const urlRoutes = require("./routes/urlRoutes");
 const { getUrlByShortCode } = require("./controllers/urlController");
 
 const app = express();
+app.set("trust proxy", 1);
 const PORT = process.env.PORT || 3000;
 const WORKER_ID = process.env.SERVER1_WORKER_ID;
 
@@ -75,9 +76,8 @@ async function startServer() {
     await connectRedis();
 
     // 3. Listen on configured port
-    app.listen(PORT, () => {
+    app.listen(PORT, "0.0.0.0", () => {
       console.log(`Server (Worker ID: ${WORKER_ID}) is running on port ${PORT}.`);
-      console.log(`Frontend UI available at: http://localhost:${PORT}`);
     });
   } catch (error) {
     console.error("Unable to start server:", error.message);
