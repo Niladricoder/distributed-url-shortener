@@ -1,0 +1,856 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Distributed URL Shortener</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #190b10;
+      --card-bg: #251219;
+      --card-border: #4a2532;
+      --accent: #e11d48;
+      --accent-hover: #be123c;
+      --accent-light: rgba(225, 29, 72, 0.16);
+      --text: #f9fafb;
+      --text-muted: #d1a7b2;
+      --success: #fb7185;
+      --success-bg: rgba(251, 113, 133, 0.1);
+      --error: #f43f5e;
+      --error-bg: rgba(244, 63, 94, 0.12);
+      --radius: 12px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    #appContent {
+      width: 100%;
+      max-width: 680px;
+    }
+
+    .loading-screen {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      overflow: hidden;
+      background: transparent;
+      transition: opacity 0.5s ease, visibility 0.5s ease;
+    }
+
+    .loading-screen.is-hidden {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    .init-backdrop {
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+      background: #08090d;
+      transition: opacity 1.6s ease;
+    }
+
+    .gate {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      z-index: 1;
+      width: 50%;
+      box-shadow: inset 0 0 90px rgba(225, 29, 72, 0.1);
+      transition: transform 1.6s cubic-bezier(0.76, 0, 0.24, 1);
+      will-change: transform;
+    }
+
+    .gate-left {
+      left: 0;
+      background: linear-gradient(110deg, #12090e 0%, #260d18 58%, #4a1026 100%);
+    }
+
+    .gate-right {
+      right: 0;
+      background: linear-gradient(250deg, #12090e 0%, #260d18 58%, #4a1026 100%);
+    }
+
+    .gate::after {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: linear-gradient(
+        180deg,
+        transparent 5%,
+        rgba(251, 113, 133, 0.78) 50%,
+        transparent 95%
+      );
+      box-shadow: 0 0 24px rgba(225, 29, 72, 0.62);
+      content: "";
+      pointer-events: none;
+    }
+
+    .gate-left::after {
+      right: 0;
+    }
+
+    .gate-right::after {
+      left: 0;
+    }
+
+    .digital-numbers {
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+      overflow: hidden;
+      pointer-events: none;
+      transition: opacity 0.35s ease;
+    }
+
+    .digital-number {
+      position: absolute;
+      color: var(--number-color, rgba(255, 255, 255, 0.58));
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+      font-size: clamp(0.65rem, 1.5vw, 0.85rem);
+      letter-spacing: 0.12em;
+      white-space: nowrap;
+      animation: digital-flicker 1.5s ease-in-out forwards;
+    }
+
+    @keyframes digital-flicker {
+      0% { opacity: 0; transform: translateY(4px); }
+      18% { opacity: 0.65; }
+      32% { opacity: 0.2; }
+      52% { opacity: 0.55; }
+      100% { opacity: 0; transform: translateY(-5px); }
+    }
+
+    .init-content {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      z-index: 3;
+      width: min(560px, calc(100% - 48px));
+      transform: translate(-50%, -50%);
+      transition: opacity 0.45s ease, transform 0.45s ease;
+    }
+
+    .init-label {
+      margin-bottom: 16px;
+      color: rgba(255, 255, 255, 0.7);
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+      font-size: 0.7rem;
+      letter-spacing: 0.2em;
+      text-align: center;
+      text-transform: uppercase;
+    }
+
+    .init-progress-track {
+      position: relative;
+      height: 12px;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .init-progress-fill {
+      position: absolute;
+      inset: 0;
+      transform: scaleX(0);
+      transform-origin: left center;
+      background: linear-gradient(90deg, #9f1239, #e11d48);
+      box-shadow: 0 0 18px rgba(225, 29, 72, 0.48);
+      will-change: transform;
+    }
+
+    .init-progress-segments {
+      position: absolute;
+      inset: 0;
+      background: repeating-linear-gradient(
+        90deg,
+        transparent 0,
+        transparent 18px,
+        rgba(255, 255, 255, 0.62) 18px,
+        rgba(255, 255, 255, 0.62) 20px
+      );
+      pointer-events: none;
+    }
+
+    .init-percentage {
+      margin-top: 12px;
+      color: #fff1f2;
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+      font-size: 0.8rem;
+      letter-spacing: 0.08em;
+      text-align: right;
+    }
+
+    .gates-opening .init-backdrop {
+      opacity: 0;
+    }
+
+    .gates-opening .gate-left {
+      transform: translateX(-101%);
+    }
+
+    .gates-opening .gate-right {
+      transform: translateX(101%);
+    }
+
+    .gates-opening .digital-numbers {
+      opacity: 0;
+    }
+
+    .gates-opening .init-content {
+      opacity: 0;
+      transform: translate(-50%, calc(-50% - 10px));
+      pointer-events: none;
+    }
+
+    /* Rose glow spanning the page — controlled by JS */
+    .neon-oval {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 120vw;
+      height: 340px;
+      background: radial-gradient(ellipse at center,
+        rgba(225, 29, 72, 0.42) 0%,
+        rgba(225, 29, 72, 0.27) 30%,
+        rgba(225, 29, 72, 0.12) 55%,
+        rgba(225, 29, 72, 0.04) 75%,
+        transparent 100%
+      );
+      border-radius: 50%;
+      box-shadow:
+        0 0 100px 40px rgba(225, 29, 72, 0.18),
+        0 0 250px 80px rgba(225, 29, 72, 0.09);
+      z-index: 0;
+      pointer-events: none;
+      transition: opacity 0.8s ease, filter 0.8s ease, transform 0.8s ease;
+    }
+
+    /* Outer glow ring — also controlled by JS */
+    .neon-ring {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 130vw;
+      height: 380px;
+      border: 2px solid rgba(251, 113, 133, 0.16);
+      border-radius: 50%;
+      box-shadow:
+        0 0 60px 20px rgba(251, 113, 133, 0.08),
+        inset 0 0 60px 20px rgba(251, 113, 133, 0.05);
+      z-index: 0;
+      pointer-events: none;
+      transition: opacity 0.8s ease;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 680px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 32px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      background: var(--accent-light);
+      color: #fda4af;
+      padding: 4px 12px;
+      border-radius: 9999px;
+      border: 1px solid rgba(251, 113, 133, 0.3);
+      margin-bottom: 12px;
+    }
+
+    .badge-dot {
+      width: 6px;
+      height: 6px;
+      background: #fb7185;
+      border-radius: 50%;
+      box-shadow: 0 0 8px #fb7185;
+    }
+
+    h1 {
+      font-size: 2.25rem;
+      font-weight: 700;
+      letter-spacing: -0.025em;
+      margin-bottom: 8px;
+      background: linear-gradient(135deg, #fff1f2 40%, #fda4af 100%);
+      background-clip: text;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    p.subtitle {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+    }
+
+    .card {
+      background: rgba(37, 18, 25, 0.88);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(251, 113, 133, 0.12);
+      border-radius: var(--radius);
+      padding: 28px;
+      box-shadow:
+        0 20px 40px -10px rgba(0, 0, 0, 0.6),
+        0 8px 16px -6px rgba(0, 0, 0, 0.4),
+        0 0 1px 0 rgba(251, 113, 133, 0.15);
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .input-wrapper {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+
+    input[type="url"], input[type="text"] {
+      width: 100%;
+      padding: 16px 18px;
+      font-size: 1rem;
+      color: var(--text);
+      background: #1d0e14;
+      border: 1px solid #633345;
+      border-radius: 10px;
+      outline: none;
+      transition: all 0.2s ease;
+    }
+
+    input[type="url"]:focus, input[type="text"]:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(225, 29, 72, 0.24);
+    }
+
+    button.btn-primary {
+      padding: 15px 24px;
+      font-size: 1rem;
+      font-weight: 600;
+      color: #ffffff;
+      background: var(--accent);
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    button.btn-primary:hover {
+      background: var(--accent-hover);
+      transform: translateY(-1px);
+    }
+
+    button.btn-primary:active {
+      transform: translateY(0);
+    }
+
+    button.btn-primary:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .spinner {
+      width: 18px;
+      height: 18px;
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      border-top-color: white;
+      animation: spin 0.8s linear infinite;
+      display: none;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .alert {
+      display: none;
+      padding: 14px 16px;
+      border-radius: 10px;
+      margin-top: 18px;
+      font-size: 0.9rem;
+      line-height: 1.4;
+    }
+
+    .alert.error {
+      display: block;
+      background: var(--error-bg);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: #fca5a5;
+    }
+
+    .result-section {
+      display: none;
+      margin-top: 24px;
+      padding-top: 24px;
+      border-top: 1px solid #4a2532;
+      animation: fadeIn 0.3s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .result-title {
+      font-size: 0.875rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--success);
+      font-weight: 600;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .short-url-box {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: #1d0e14;
+      border: 1px solid #633345;
+      border-radius: 10px;
+      padding: 8px 12px 8px 16px;
+    }
+
+    .short-url-link {
+      flex: 1;
+      color: #fda4af;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 1.05rem;
+      text-decoration: none;
+      word-break: break-all;
+    }
+
+    .short-url-link:hover {
+      text-decoration: underline;
+    }
+
+    .copy-btn {
+      padding: 8px 14px;
+      background: #3b1925;
+      color: #ffe4e9;
+      border: 1px solid #754052;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      white-space: nowrap;
+    }
+
+    .copy-btn:hover {
+      background: #542333;
+      color: #ffffff;
+    }
+
+    .copy-btn.copied {
+      background: var(--success);
+      color: #ffffff;
+      border-color: var(--success);
+    }
+
+    .details-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .detail-item {
+      background: rgba(29, 14, 20, 0.9);
+      padding: 12px 14px;
+      border-radius: 8px;
+      border: 1px solid rgba(251, 113, 133, 0.08);
+    }
+
+    .detail-label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+
+    .detail-value {
+      font-size: 0.875rem;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--text);
+      word-break: break-all;
+    }
+
+    .footer {
+      text-align: center;
+      margin-top: 24px;
+      font-size: 0.8rem;
+      color: #b98594;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .loading-screen,
+      .init-backdrop,
+      .gate,
+      .digital-numbers,
+      .init-content {
+        transition-duration: 0.01ms !important;
+      }
+
+      .digital-number {
+        animation: none;
+        opacity: 0.5;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="loading-screen" id="loadingScreen" aria-hidden="false">
+    <div class="init-backdrop" aria-hidden="true"></div>
+    <div class="gate gate-left" aria-hidden="true"></div>
+    <div class="gate gate-right" aria-hidden="true"></div>
+    <div class="digital-numbers" id="digitalNumbers" aria-hidden="true"></div>
+    <div class="init-content">
+      <div class="init-label">System initialization</div>
+      <div
+        class="init-progress-track"
+        id="initProgressTrack"
+        role="progressbar"
+        aria-label="System initialization"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-valuenow="0"
+      >
+        <div class="init-progress-fill" id="initProgressFill"></div>
+        <div class="init-progress-segments" aria-hidden="true"></div>
+      </div>
+      <div class="init-percentage" id="initPercentage">0%</div>
+    </div>
+  </div>
+
+  <main id="appContent" aria-hidden="true" aria-busy="true" inert>
+  <!-- Rose glow background (controlled by JS) -->
+  <div class="neon-oval" id="neonOval"></div>
+  <div class="neon-ring" id="neonRing"></div>
+
+  <div class="container">
+    <div class="header">
+      <div class="badge">
+        <span class="badge-dot"></span>
+        Distributed Architecture &bull; Snowflake &bull; Redis Cache
+      </div>
+      <h1>URL Shortener</h1>
+      <p class="subtitle">Paste your long link below to get a clean, fast shortened URL</p>
+    </div>
+
+    <div class="card">
+      <form id="shortenForm" class="form-group" onsubmit="handleShorten(event)">
+        <div class="input-wrapper">
+          <input
+            type="text"
+            id="urlInput"
+            placeholder="https://example.com/very/long/url/to/shorten"
+            autocomplete="off"
+            required
+          />
+        </div>
+        <button type="submit" id="submitBtn" class="btn-primary">
+          <span class="spinner" id="spinner"></span>
+          <span id="btnText">Shorten URL</span>
+        </button>
+      </form>
+
+      <!-- Error Alert -->
+      <div id="errorAlert" class="alert"></div>
+
+      <!-- Result Section -->
+      <div id="resultSection" class="result-section">
+        <div class="result-title">
+          <svg width="16" height="16" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+          </svg>
+          Here is your shortened URL:
+        </div>
+        <div class="short-url-box">
+          <a id="shortUrlLink" class="short-url-link" href="#" target="_blank" rel="noopener noreferrer"></a>
+          <button type="button" class="copy-btn" id="copyBtn" onclick="copyShortUrl()">Copy Link</button>
+        </div>
+
+        <div class="details-grid">
+          <div class="detail-item">
+            <div class="detail-label">Short Code</div>
+            <div class="detail-value" id="detailShortCode">-</div>
+          </div>
+          <div class="detail-item">
+            <div class="detail-label">Snowflake ID</div>
+            <div class="detail-value" id="detailSnowflakeId">-</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      Powered by Node.js, Express, MongoDB Atlas &amp; Redis Cloud
+    </div>
+  </div>
+  </main>
+
+  <script>
+    const loadingScreen = document.getElementById('loadingScreen');
+    const appContent = document.getElementById('appContent');
+    const progressTrack = document.getElementById('initProgressTrack');
+    const progressFill = document.getElementById('initProgressFill');
+    const progressPercentage = document.getElementById('initPercentage');
+    const digitalNumbers = document.getElementById('digitalNumbers');
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const progressDuration = prefersReducedMotion ? 1500 : 4800;
+    let currentProgress = 0;
+    let progressStartTime = null;
+    let numberInterval = null;
+    let initializationStarted = false;
+
+    function updateProgress(value) {
+      currentProgress = Math.max(currentProgress, Math.min(100, value));
+      progressFill.style.transform = `scaleX(${currentProgress / 100})`;
+      progressPercentage.textContent = `${currentProgress}%`;
+      progressTrack.setAttribute('aria-valuenow', String(currentProgress));
+    }
+
+    function createDigitalNumber() {
+      const number = document.createElement('span');
+      const length = 4 + Math.floor(Math.random() * 5);
+      const characters = Array.from({ length }, () => Math.floor(Math.random() * 10)).join('');
+      let left = 5 + Math.random() * 90;
+      let top = 8 + Math.random() * 84;
+
+      for (let attempt = 0; attempt < 8 && left > 15 && left < 85 && top > 38 && top < 62; attempt += 1) {
+        left = 5 + Math.random() * 90;
+        top = 8 + Math.random() * 84;
+      }
+
+      number.className = 'digital-number';
+      number.textContent = characters;
+      number.style.left = `${left}%`;
+      number.style.top = `${top}%`;
+      number.style.setProperty(
+        '--number-color',
+        Math.random() < 0.65 ? 'rgba(255, 255, 255, 0.62)' : 'rgba(251, 113, 133, 0.66)'
+      );
+      digitalNumbers.appendChild(number);
+      window.setTimeout(() => number.remove(), prefersReducedMotion ? 900 : 1500);
+    }
+
+    function stopDigitalNumbers() {
+      if (numberInterval !== null) {
+        window.clearInterval(numberInterval);
+        numberInterval = null;
+      }
+    }
+
+    function openGates() {
+      digitalNumbers.replaceChildren();
+      loadingScreen.classList.add('gates-opening');
+
+      window.setTimeout(() => {
+        appContent.removeAttribute('inert');
+        appContent.setAttribute('aria-hidden', 'false');
+        appContent.setAttribute('aria-busy', 'false');
+        loadingScreen.setAttribute('aria-hidden', 'true');
+        loadingScreen.classList.add('is-hidden');
+      }, prefersReducedMotion ? 50 : 1700);
+    }
+
+    function animateProgress(timestamp) {
+      if (progressStartTime === null) progressStartTime = timestamp;
+
+      const elapsed = timestamp - progressStartTime;
+      const progress = Math.min(elapsed / progressDuration, 1);
+      updateProgress(Math.floor(progress * 100));
+
+      if (progress < 1) {
+        window.requestAnimationFrame(animateProgress);
+        return;
+      }
+
+      updateProgress(100);
+      stopDigitalNumbers();
+      window.setTimeout(openGates, 600);
+    }
+
+    function startInitialization() {
+      if (initializationStarted) return;
+      initializationStarted = true;
+      createDigitalNumber();
+      numberInterval = window.setInterval(createDigitalNumber, prefersReducedMotion ? 360 : 190);
+      window.requestAnimationFrame(animateProgress);
+    }
+
+    if (document.readyState === 'complete') {
+      startInitialization();
+    } else {
+      window.addEventListener('load', startInitialization, { once: true });
+    }
+
+    const form = document.getElementById('shortenForm');
+    const urlInput = document.getElementById('urlInput');
+    const submitBtn = document.getElementById('submitBtn');
+    const spinner = document.getElementById('spinner');
+    const btnText = document.getElementById('btnText');
+    const errorAlert = document.getElementById('errorAlert');
+    const resultSection = document.getElementById('resultSection');
+    const shortUrlLink = document.getElementById('shortUrlLink');
+    const copyBtn = document.getElementById('copyBtn');
+    const detailShortCode = document.getElementById('detailShortCode');
+    const detailSnowflakeId = document.getElementById('detailSnowflakeId');
+
+    // Auto-detect backend API address:
+    // If running on backend port (e.g. :3000), use relative path.
+    // If opened via Live Server (e.g. :5500) or file://, target http://localhost:3000
+    const API_BASE = (window.location.port === '3000') 
+      ? '' 
+      : 'http://localhost:3000';
+
+    // Clear any previously saved local storage history
+    try {
+      localStorage.removeItem('short_urls_history');
+    } catch (_) {}
+
+    async function handleShorten(e) {
+      e.preventDefault();
+      hideError();
+      resultSection.style.display = 'none';
+
+      let originalUrl = urlInput.value.trim();
+
+      // Auto prepend https:// if missing protocol
+      if (!/^https?:\/\//i.test(originalUrl)) {
+        originalUrl = 'https://' + originalUrl;
+        urlInput.value = originalUrl;
+      }
+
+      setLoading(true);
+
+      try {
+        const endpoint = `${API_BASE}/api/urls/shorten`;
+        let response;
+        try {
+          response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+            body: JSON.stringify({ url: originalUrl }),
+          });
+        } catch (networkErr) {
+          throw new Error('Cannot connect to backend server. Make sure "npm start" is running in the backend folder on port 3000.');
+        }
+
+        // Safely extract response text to prevent empty JSON.parse crashes
+        const responseText = await response.text();
+        let data = null;
+
+        if (responseText && responseText.trim().length > 0) {
+          try {
+            data = JSON.parse(responseText);
+          } catch (jsonErr) {
+            console.error('Non-JSON server response:', responseText);
+            throw new Error(`Server returned unexpected format (${response.status}): ${responseText.slice(0, 120)}`);
+          }
+        }
+
+        if (!response.ok) {
+          const errMsg = (data && data.error) ? data.error : `Server Error (${response.status}). Please check server logs.`;
+          throw new Error(errMsg);
+        }
+
+        if (!data || !data.shortUrl) {
+          throw new Error('Server returned an empty or invalid response.');
+        }
+
+        // Display Result
+        shortUrlLink.href = data.shortUrl;
+        shortUrlLink.textContent = data.shortUrl;
+        detailShortCode.textContent = data.shortCode;
+        detailSnowflakeId.textContent = data.snowflakeId || 'Generated';
+        resultSection.style.display = 'block';
+
+      } catch (err) {
+        showError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    function copyShortUrl() {
+      const url = shortUrlLink.textContent;
+      navigator.clipboard.writeText(url).then(() => {
+        copyBtn.textContent = 'Copied!';
+        copyBtn.classList.add('copied');
+        setTimeout(() => {
+          copyBtn.textContent = 'Copy Link';
+          copyBtn.classList.remove('copied');
+        }, 2000);
+      }).catch(() => {
+        showError('Could not copy to clipboard. Please copy manually.');
+      });
+    }
+
+    function setLoading(isLoading) {
+      submitBtn.disabled = isLoading;
+      spinner.style.display = isLoading ? 'inline-block' : 'none';
+      btnText.textContent = isLoading ? 'Shortening...' : 'Shorten URL';
+    }
+
+    function showError(msg) {
+      errorAlert.textContent = msg;
+      errorAlert.className = 'alert error';
+      errorAlert.style.display = 'block';
+    }
+
+    function hideError() {
+      errorAlert.style.display = 'none';
+    }
+
+  </script>
+</body>
+</html>
